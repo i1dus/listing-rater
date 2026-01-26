@@ -1,0 +1,332 @@
+{% extends "base.html" %}
+
+{% block title %}Парсинг - Listing Rater{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Управление парсингом</h1>
+
+<div class="row">
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-gear me-2"></i> Настройки парсинга
+            </div>
+            <div class="card-body">
+                <form id="parser-form">
+                    <div class="mb-3">
+                        <label class="form-label">Город/Регион</label>
+                        <select class="form-select" id="city" required>
+                            <option value="">Загрузка...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Категория</label>
+                        <select class="form-select" id="category" required>
+                            <option value="">Загрузка...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Тип сделки</label>
+                        <select class="form-select" id="deal_type" required>
+                            <option value="">Загрузка...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Количество страниц</label>
+                        <input type="number" class="form-control" id="max_pages" value="5" min="1" max="100">
+                        <small class="text-muted">Максимум 100 страниц</small>
+                    </div>
+                    
+                    <hr>
+                    
+                    <h6>Дополнительные фильтры (опционально)</h6>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Цена от</label>
+                            <input type="number" class="form-control" id="price_min" placeholder="Минимум">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Цена до</label>
+                            <input type="number" class="form-control" id="price_max" placeholder="Максимум">
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary w-100" id="start-btn">
+                        <i class="bi bi-play-fill me-2"></i> Запустить парсинг
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Проверка снятых -->
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-check2-circle me-2"></i> Проверка объявлений
+            </div>
+            <div class="card-body">
+                <p class="text-muted">Проверить актуальность активных объявлений и пометить снятые.</p>
+                <button class="btn btn-outline-warning w-100" onclick="checkRemoved()" id="check-btn">
+                    <i class="bi bi-search me-2"></i> Проверить снятые объявления
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-6">
+        <!-- Статус -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-activity me-2"></i> Статус
+            </div>
+            <div class="card-body">
+                <div id="status-container">
+                    <div class="d-flex align-items-center">
+                        <span class="badge bg-secondary me-2" id="status-badge">Ожидание</span>
+                        <span id="status-text">Парсинг не запущен</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Результаты -->
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-clipboard-data me-2"></i> Последний результат
+            </div>
+            <div class="card-body">
+                <div id="result-container">
+                    <p class="text-muted">Нет данных</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let statusCheckInterval = null;
+    
+    // Загрузка конфигураций
+    async function loadConfigs() {
+        try {
+            const [citiesRes, categoriesRes, dealTypesRes] = await Promise.all([
+                fetch('/api/parser/config/cities'),
+                fetch('/api/parser/config/categories'),
+                fetch('/api/parser/config/deal-types')
+            ]);
+            
+            const cities = await citiesRes.json();
+            const categories = await categoriesRes.json();
+            const dealTypes = await dealTypesRes.json();
+            
+            // Города
+            const citySelect = document.getElementById('city');
+            citySelect.innerHTML = '';
+            for (const city of cities.cities) {
+                const option = document.createElement('option');
+                option.value = city.slug;
+                option.textContent = city.name;
+                citySelect.appendChild(option);
+            }
+            
+            // Категории
+            const categorySelect = document.getElementById('category');
+            categorySelect.innerHTML = '';
+            for (const cat of categories.categories) {
+                const option = document.createElement('option');
+                option.value = cat.slug;
+                option.textContent = cat.name;
+                categorySelect.appendChild(option);
+            }
+            
+            // Типы сделок
+            const dealTypeSelect = document.getElementById('deal_type');
+            dealTypeSelect.innerHTML = '';
+            for (const dt of dealTypes.deal_types) {
+                const option = document.createElement('option');
+                option.value = dt.slug;
+                option.textContent = dt.name;
+                dealTypeSelect.appendChild(option);
+            }
+            
+        } catch (error) {
+            console.error('Error loading configs:', error);
+        }
+    }
+    
+    // Запуск парсинга
+    document.getElementById('parser-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const config = {
+            city: document.getElementById('city').value,
+            category: document.getElementById('category').value,
+            deal_type: document.getElementById('deal_type').value,
+            max_pages: parseInt(document.getElementById('max_pages').value),
+            filters: {}
+        };
+        
+        const priceMin = document.getElementById('price_min').value;
+        const priceMax = document.getElementById('price_max').value;
+        
+        if (priceMin) config.filters.pmin = parseInt(priceMin);
+        if (priceMax) config.filters.pmax = parseInt(priceMax);
+        
+        if (Object.keys(config.filters).length === 0) {
+            config.filters = null;
+        }
+        
+        try {
+            document.getElementById('start-btn').disabled = true;
+            document.getElementById('start-btn').innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span> Запуск...';
+            
+            const response = await fetch('/api/parser/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            
+            const result = await response.json();
+            
+            if (result.status === 'started') {
+                updateStatus('running', 'Парсинг запущен...');
+                startStatusCheck();
+            } else if (result.status === 'already_running') {
+                updateStatus('running', 'Парсинг уже выполняется');
+                startStatusCheck();
+            }
+            
+        } catch (error) {
+            console.error('Error starting parser:', error);
+            updateStatus('error', 'Ошибка запуска');
+        } finally {
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('start-btn').innerHTML = '<i class="bi bi-play-fill me-2"></i> Запустить парсинг';
+        }
+    });
+    
+    // Проверка статуса
+    async function checkStatus() {
+        try {
+            const response = await fetch('/api/parser/status');
+            const status = await response.json();
+            
+            if (status.is_running) {
+                updateStatus('running', status.progress || 'Выполняется...');
+            } else {
+                stopStatusCheck();
+                
+                if (status.last_result) {
+                    if (status.last_result.error) {
+                        updateStatus('error', 'Ошибка: ' + status.last_result.error);
+                    } else {
+                        updateStatus('success', 'Завершено');
+                        showResult(status.last_result);
+                    }
+                } else {
+                    updateStatus('idle', 'Ожидание');
+                }
+            }
+        } catch (error) {
+            console.error('Error checking status:', error);
+        }
+    }
+    
+    function startStatusCheck() {
+        if (statusCheckInterval) return;
+        statusCheckInterval = setInterval(checkStatus, 2000);
+    }
+    
+    function stopStatusCheck() {
+        if (statusCheckInterval) {
+            clearInterval(statusCheckInterval);
+            statusCheckInterval = null;
+        }
+    }
+    
+    function updateStatus(type, text) {
+        const badge = document.getElementById('status-badge');
+        const statusText = document.getElementById('status-text');
+        
+        const badges = {
+            'idle': 'bg-secondary',
+            'running': 'bg-primary',
+            'success': 'bg-success',
+            'error': 'bg-danger'
+        };
+        
+        const labels = {
+            'idle': 'Ожидание',
+            'running': 'Выполняется',
+            'success': 'Успешно',
+            'error': 'Ошибка'
+        };
+        
+        badge.className = 'badge me-2 ' + (badges[type] || 'bg-secondary');
+        badge.textContent = labels[type] || type;
+        statusText.textContent = text;
+        
+        if (type === 'running') {
+            badge.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Выполняется';
+        }
+    }
+    
+    function showResult(result) {
+        const container = document.getElementById('result-container');
+        container.innerHTML = `
+            <div class="row text-center">
+                <div class="col-6 col-md-3 mb-3">
+                    <h4 class="text-primary">${result.total_found}</h4>
+                    <small class="text-muted">Найдено</small>
+                </div>
+                <div class="col-6 col-md-3 mb-3">
+                    <h4 class="text-success">${result.new_listings}</h4>
+                    <small class="text-muted">Новых</small>
+                </div>
+                <div class="col-6 col-md-3 mb-3">
+                    <h4 class="text-info">${result.updated_listings}</h4>
+                    <small class="text-muted">Обновлено</small>
+                </div>
+                <div class="col-6 col-md-3 mb-3">
+                    <h4 class="text-danger">${result.errors}</h4>
+                    <small class="text-muted">Ошибок</small>
+                </div>
+            </div>
+            <hr>
+            <p class="text-muted mb-0">Обработано страниц: ${result.pages_parsed}</p>
+        `;
+    }
+    
+    // Проверка снятых объявлений
+    async function checkRemoved() {
+        const btn = document.getElementById('check-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span> Проверка...';
+        
+        try {
+            const response = await fetch('/api/parser/check-removed', { method: 'POST' });
+            const result = await response.json();
+            
+            alert(`Проверено: ${result.checked}\nПомечено как снятые: ${result.removed}`);
+            
+        } catch (error) {
+            console.error('Error checking removed:', error);
+            alert('Ошибка проверки');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-search me-2"></i> Проверить снятые объявления';
+        }
+    }
+    
+    // Инициализация
+    document.addEventListener('DOMContentLoaded', () => {
+        loadConfigs();
+        checkStatus();
+    });
+</script>
+{% endblock %}

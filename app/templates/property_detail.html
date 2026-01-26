@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block title %}Объект недвижимости - Listing Rater{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <a href="/properties" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-2"></i> Назад к списку
+    </a>
+</div>
+
+<div id="loading" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status"></div>
+    <p class="mt-2">Загрузка...</p>
+</div>
+
+<div id="content" style="display: none;">
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-building me-2"></i> Объект недвижимости #<span id="property-id">-</span>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p class="mb-2"><strong>Город:</strong> <span id="property-city">-</span></p>
+                            <p class="mb-2"><strong>Район:</strong> <span id="property-district">-</span></p>
+                            <p class="mb-2"><strong>Улица:</strong> <span id="property-street">-</span></p>
+                            <p class="mb-2"><strong>Дом:</strong> <span id="property-house">-</span></p>
+                        </div>
+                        <div class="col-md-6">
+                            <p class="mb-2"><strong>Тип:</strong> <span id="property-type">-</span></p>
+                            <p class="mb-2"><strong>Комнат:</strong> <span id="property-rooms">-</span></p>
+                            <p class="mb-2"><strong>Площадь:</strong> <span id="property-area">-</span></p>
+                            <p class="mb-2"><strong>Этаж:</strong> <span id="property-floor">-</span></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Связанные объявления -->
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-card-list me-2"></i> Связанные объявления
+                </div>
+                <div class="card-body">
+                    <div id="listings-table"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-pencil me-2"></i> Редактирование
+                </div>
+                <div class="card-body">
+                    <form id="edit-form">
+                        <div class="mb-3">
+                            <label class="form-label">Город</label>
+                            <input type="text" class="form-control" id="edit-city">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Улица</label>
+                            <input type="text" class="form-control" id="edit-street">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Дом</label>
+                            <input type="text" class="form-control" id="edit-house">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Комнат</label>
+                            <input type="number" class="form-control" id="edit-rooms">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Площадь</label>
+                            <input type="number" step="0.1" class="form-control" id="edit-area">
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="bi bi-check-lg me-2"></i> Сохранить
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const propertyId = {{ property_id }};
+    
+    async function loadProperty() {
+        try {
+            const response = await fetch(`/api/properties/${propertyId}`);
+            if (!response.ok) throw new Error('Not found');
+            
+            const data = await response.json();
+            
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+            
+            document.getElementById('property-id').textContent = data.id;
+            document.getElementById('property-city').textContent = data.city || '-';
+            document.getElementById('property-district').textContent = data.district || '-';
+            document.getElementById('property-street').textContent = data.street || '-';
+            document.getElementById('property-house').textContent = data.house_number || '-';
+            document.getElementById('property-type').textContent = data.property_type || '-';
+            document.getElementById('property-rooms').textContent = data.rooms !== null ? data.rooms : '-';
+            document.getElementById('property-area').textContent = data.area_total ? `${data.area_total} м²` : '-';
+            document.getElementById('property-floor').textContent = 
+                data.floor ? `${data.floor}/${data.floors_total || '?'}` : '-';
+            
+            // Форма
+            document.getElementById('edit-city').value = data.city || '';
+            document.getElementById('edit-street').value = data.street || '';
+            document.getElementById('edit-house').value = data.house_number || '';
+            document.getElementById('edit-rooms').value = data.rooms !== null ? data.rooms : '';
+            document.getElementById('edit-area').value = data.area_total || '';
+            
+            // Объявления
+            if (data.listings && data.listings.length > 0) {
+                let html = '<div class="table-responsive"><table class="table table-hover"><thead><tr>';
+                html += '<th>ID</th><th>Заголовок</th><th>Цена</th><th>Тип</th><th>Статус</th></tr></thead><tbody>';
+                
+                for (const listing of data.listings) {
+                    const price = listing.price ? new Intl.NumberFormat('ru-RU').format(listing.price) + ' ₽' : '-';
+                    const status = listing.is_active 
+                        ? '<span class="badge badge-active">Активно</span>'
+                        : '<span class="badge badge-inactive">Снято</span>';
+                    // Отображаем тип сделки (может быть уже на русском или транслит)
+                    const getDealTypeDisplay = (dealType) => {
+                        if (dealType === 'Продажа' || dealType === 'prodam' || dealType === 'sale') return 'Продажа';
+                        if (dealType === 'Аренда' || dealType === 'sdam' || dealType === 'rent') return 'Аренда';
+                        return dealType || '-';
+                    };
+                    
+                    html += `
+                        <tr onclick="window.location='/listings/${listing.id}'" style="cursor:pointer">
+                            <td>${listing.avito_id}</td>
+                            <td>${listing.title ? listing.title.substring(0, 30) + '...' : '-'}</td>
+                            <td>${price}</td>
+                            <td>${getDealTypeDisplay(listing.deal_type)}</td>
+                            <td>${status}</td>
+                        </tr>
+                    `;
+                }
+                
+                html += '</tbody></table></div>';
+                document.getElementById('listings-table').innerHTML = html;
+            } else {
+                document.getElementById('listings-table').innerHTML = '<p class="text-muted">Нет связанных объявлений</p>';
+            }
+            
+        } catch (error) {
+            console.error('Error:', error);
+            document.getElementById('loading').innerHTML = '<div class="alert alert-danger">Объект не найден</div>';
+        }
+    }
+    
+    document.getElementById('edit-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const data = {
+            city: document.getElementById('edit-city').value || null,
+            street: document.getElementById('edit-street').value || null,
+            house_number: document.getElementById('edit-house').value || null,
+            rooms: parseInt(document.getElementById('edit-rooms').value) || null,
+            area_total: parseFloat(document.getElementById('edit-area').value) || null
+        };
+        
+        try {
+            const response = await fetch(`/api/properties/${propertyId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            if (response.ok) {
+                alert('Сохранено!');
+                loadProperty();
+            }
+        } catch (error) {
+            alert('Ошибка сохранения');
+        }
+    });
+    
+    document.addEventListener('DOMContentLoaded', loadProperty);
+</script>
+{% endblock %}

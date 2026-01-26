@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+
+{% block title %}Объявления - Listing Rater{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Объявления</h1>
+    <a href="/parser" class="btn btn-primary">
+        <i class="bi bi-cloud-download me-2"></i> Запустить парсинг
+    </a>
+</div>
+
+<!-- Фильтры -->
+<div class="filter-section">
+    <form id="filter-form" class="row g-3">
+        <div class="col-md-3">
+            <div class="search-box">
+                <i class="bi bi-search"></i>
+                <input type="text" class="form-control" id="search" placeholder="Поиск...">
+            </div>
+        </div>
+        <div class="col-md-2">
+            <select class="form-select" id="city">
+                <option value="">Все города</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <select class="form-select" id="deal_type">
+                <option value="">Тип сделки</option>
+                <option value="Продажа">Продажа</option>
+                <option value="Аренда">Аренда</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <select class="form-select" id="is_active">
+                <option value="">Все статусы</option>
+                <option value="true">Активные</option>
+                <option value="false">Неактивные</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <select class="form-select" id="rooms">
+                <option value="">Комнаты</option>
+                <option value="0">Студия</option>
+                <option value="1">1 комната</option>
+                <option value="2">2 комнаты</option>
+                <option value="3">3 комнаты</option>
+                <option value="4">4+ комнаты</option>
+            </select>
+        </div>
+        <div class="col-md-1">
+            <button type="submit" class="btn btn-primary w-100">
+                <i class="bi bi-funnel"></i>
+            </button>
+        </div>
+    </form>
+</div>
+
+<!-- Таблица объявлений -->
+<div class="card">
+    <div class="card-body">
+        <div id="loading" class="loading-spinner">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-2">Загрузка...</p>
+        </div>
+        
+        <div id="listings-table"></div>
+        
+        <!-- Пагинация -->
+        <nav id="pagination" class="mt-4"></nav>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentPage = 1;
+    const perPage = 20;
+    
+    async function loadListings(page = 1) {
+        const loading = document.getElementById('loading');
+        const tableContainer = document.getElementById('listings-table');
+        
+        loading.classList.add('show');
+        tableContainer.innerHTML = '';
+        
+        const params = new URLSearchParams({
+            page: page,
+            per_page: perPage
+        });
+        
+        const search = document.getElementById('search').value;
+        const city = document.getElementById('city').value;
+        const dealType = document.getElementById('deal_type').value;
+        const isActive = document.getElementById('is_active').value;
+        const rooms = document.getElementById('rooms').value;
+        
+        if (search) params.append('search', search);
+        if (city) params.append('city', city);
+        if (dealType) params.append('deal_type', dealType);
+        if (isActive) params.append('is_active', isActive);
+        if (rooms) {
+            if (rooms === '4') {
+                params.append('min_rooms', '4');
+            } else {
+                params.append('min_rooms', rooms);
+                params.append('max_rooms', rooms);
+            }
+        }
+        
+        try {
+            const response = await fetch(`/api/listings?${params}`);
+            const data = await response.json();
+            
+            loading.classList.remove('show');
+            
+            if (data.items.length === 0) {
+                tableContainer.innerHTML = `
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-inbox fs-1"></i>
+                        <p class="mt-2">Объявления не найдены</p>
+                    </div>
+                `;
+                document.getElementById('pagination').innerHTML = '';
+                return;
+            }
+            
+            let html = `
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID Avito</th>
+                                <th>Заголовок</th>
+                                <th>Цена</th>
+                                <th>Город</th>
+                                <th>Комнаты</th>
+                                <th>Площадь</th>
+                                <th>Статус</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            for (const listing of data.items) {
+                const status = listing.is_active 
+                    ? '<span class="badge badge-active">Активно</span>' 
+                    : '<span class="badge badge-inactive">Снято</span>';
+                const price = listing.price 
+                    ? new Intl.NumberFormat('ru-RU').format(listing.price) + ' ₽' 
+                    : '-';
+                const rooms = listing.rooms !== null ? listing.rooms : '-';
+                const area = listing.area_total ? listing.area_total + ' м²' : '-';
+                
+                html += `
+                    <tr>
+                        <td><a href="${listing.url}" target="_blank">${listing.avito_id}</a></td>
+                        <td>
+                            <a href="/listings/${listing.id}" class="text-decoration-none">
+                                ${listing.title ? listing.title.substring(0, 50) + (listing.title.length > 50 ? '...' : '') : '-'}
+                            </a>
+                        </td>
+                        <td>${price}</td>
+                        <td>${listing.city || '-'}</td>
+                        <td>${rooms}</td>
+                        <td>${area}</td>
+                        <td>${status}</td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <a href="/listings/${listing.id}" class="btn btn-outline-primary" title="Просмотр">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                <button class="btn btn-outline-danger" onclick="deleteListing(${listing.id})" title="Удалить">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
+            
+            html += '</tbody></table></div>';
+            tableContainer.innerHTML = html;
+            
+            // Пагинация
+            renderPagination(data.page, data.pages, data.total);
+            currentPage = page;
+            
+        } catch (error) {
+            loading.classList.remove('show');
+            console.error('Error loading listings:', error);
+            tableContainer.innerHTML = `
+                <div class="alert alert-danger">
+                    Ошибка загрузки данных
+                </div>
+            `;
+        }
+    }
+    
+    function renderPagination(page, pages, total) {
+        if (pages <= 1) {
+            document.getElementById('pagination').innerHTML = '';
+            return;
+        }
+        
+        let html = `
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="text-muted">Всего: ${total}</span>
+                <ul class="pagination mb-0">
+        `;
+        
+        // Предыдущая страница
+        html += `
+            <li class="page-item ${page === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="loadListings(${page - 1}); return false;">
+                    <i class="bi bi-chevron-left"></i>
+                </a>
+            </li>
+        `;
+        
+        // Номера страниц
+        const startPage = Math.max(1, page - 2);
+        const endPage = Math.min(pages, page + 2);
+        
+        if (startPage > 1) {
+            html += `<li class="page-item"><a class="page-link" href="#" onclick="loadListings(1); return false;">1</a></li>`;
+            if (startPage > 2) {
+                html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            }
+        }
+        
+        for (let i = startPage; i <= endPage; i++) {
+            html += `
+                <li class="page-item ${i === page ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="loadListings(${i}); return false;">${i}</a>
+                </li>
+            `;
+        }
+        
+        if (endPage < pages) {
+            if (endPage < pages - 1) {
+                html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            }
+            html += `<li class="page-item"><a class="page-link" href="#" onclick="loadListings(${pages}); return false;">${pages}</a></li>`;
+        }
+        
+        // Следующая страница
+        html += `
+            <li class="page-item ${page === pages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="loadListings(${page + 1}); return false;">
+                    <i class="bi bi-chevron-right"></i>
+                </a>
+            </li>
+        `;
+        
+        html += '</ul></div>';
+        document.getElementById('pagination').innerHTML = html;
+    }
+    
+    async function deleteListing(id) {
+        if (!confirm('Удалить объявление?')) return;
+        
+        try {
+            const response = await fetch(`/api/listings/${id}`, { method: 'DELETE' });
+            if (response.ok) {
+                loadListings(currentPage);
+            }
+        } catch (error) {
+            console.error('Error deleting listing:', error);
+        }
+    }
+    
+    // Загрузка городов для фильтра
+    async function loadCities() {
+        try {
+            const response = await fetch('/api/listings/stats/summary');
+            const data = await response.json();
+            
+            const select = document.getElementById('city');
+            for (const city of data.top_cities || []) {
+                const option = document.createElement('option');
+                option.value = city.city;
+                option.textContent = city.city;
+                select.appendChild(option);
+            }
+        } catch (error) {
+            console.error('Error loading cities:', error);
+        }
+    }
+    
+    // Обработка формы фильтров
+    document.getElementById('filter-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        loadListings(1);
+    });
+    
+    // Инициализация
+    document.addEventListener('DOMContentLoaded', () => {
+        loadCities();
+        loadListings();
+    });
+</script>
+{% endblock %}

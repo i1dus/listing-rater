@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+
+{% block title %}Объекты недвижимости - Listing Rater{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Объекты недвижимости</h1>
+    <button class="btn btn-outline-primary" onclick="rematchProperties()">
+        <i class="bi bi-arrow-repeat me-2"></i> Пересопоставить
+    </button>
+</div>
+
+<!-- Фильтры -->
+<div class="filter-section">
+    <form id="filter-form" class="row g-3">
+        <div class="col-md-2">
+            <select class="form-select" id="city">
+                <option value="">Город</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <select class="form-select" id="rooms">
+                <option value="">Комнаты</option>
+                <option value="0">Студия</option>
+                <option value="1">1 комната</option>
+                <option value="2">2 комнаты</option>
+                <option value="3">3 комнаты</option>
+                <option value="4">4+ комнаты</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <input type="number" class="form-control" id="min_area" placeholder="Площадь от">
+        </div>
+        <div class="col-md-2">
+            <input type="number" class="form-control" id="max_area" placeholder="Площадь до">
+        </div>
+        <div class="col-md-2">
+            <input type="number" class="form-control" id="min_price" placeholder="Цена от">
+        </div>
+        <div class="col-md-2">
+            <input type="number" class="form-control" id="max_price" placeholder="Цена до">
+        </div>
+        <div class="col-md-2">
+            <select class="form-select" id="sort_by">
+                <option value="">Сортировка</option>
+                <option value="price_asc">Цена: по возрастанию</option>
+                <option value="price_desc">Цена: по убыванию</option>
+                <option value="created_at">Дата создания</option>
+            </select>
+        </div>
+        <div class="col-md-1">
+            <button type="submit" class="btn btn-primary w-100">
+                Поиск
+            </button>
+        </div>
+    </form>
+</div>
+
+<!-- Таблица -->
+<div class="card">
+    <div class="card-body">
+        <div id="loading" class="loading-spinner">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-2">Загрузка...</p>
+        </div>
+        
+        <div id="properties-table"></div>
+        <nav id="pagination" class="mt-4"></nav>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentPage = 1;
+    const perPage = 20;
+    
+    async function loadProperties(page = 1) {
+        // Убеждаемся что page это число
+        page = parseInt(page) || 1;
+        if (page < 1) page = 1;
+        
+        const loading = document.getElementById('loading');
+        const tableContainer = document.getElementById('properties-table');
+        
+        loading.classList.add('show');
+        tableContainer.innerHTML = '';
+        
+        const params = new URLSearchParams({
+            page: page.toString(),
+            per_page: perPage.toString()
+        });
+        
+        const city = document.getElementById('city').value;
+        const rooms = document.getElementById('rooms').value;
+        const minArea = document.getElementById('min_area').value;
+        const maxArea = document.getElementById('max_area').value;
+        const minPrice = document.getElementById('min_price').value;
+        const maxPrice = document.getElementById('max_price').value;
+        const sortBy = document.getElementById('sort_by').value;
+        
+        if (city) params.append('city', city);
+        if (rooms) {
+            if (rooms === '4') {
+                params.append('min_rooms', '4');
+            } else {
+                params.append('min_rooms', rooms);
+                params.append('max_rooms', rooms);
+            }
+        }
+        if (minArea) params.append('min_area', minArea);
+        if (maxArea) params.append('max_area', maxArea);
+        if (minPrice) params.append('min_price', minPrice);
+        if (maxPrice) params.append('max_price', maxPrice);
+        if (sortBy) params.append('sort_by', sortBy);
+        
+        try {
+            const response = await fetch(`/api/properties?${params}`);
+            const data = await response.json();
+            
+            loading.classList.remove('show');
+            
+            if (data.items.length === 0) {
+                tableContainer.innerHTML = `
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-building fs-1"></i>
+                        <p class="mt-2">Объекты не найдены</p>
+                    </div>
+                `;
+                document.getElementById('pagination').innerHTML = '';
+                return;
+            }
+            
+            let html = `
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Адрес</th>
+                                <th>Тип</th>
+                                <th>Комнаты</th>
+                                <th>Площадь</th>
+                                <th>Этаж</th>
+                                <th>Объявлений</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            for (const prop of data.items) {
+                const address = [prop.city, prop.street, prop.house_number].filter(Boolean).join(', ') || '-';
+                const rooms = prop.rooms !== null ? prop.rooms : '-';
+                const area = prop.area_total ? prop.area_total + ' м²' : '-';
+                const floor = prop.floor ? `${prop.floor}/${prop.floors_total || '?'}` : '-';
+                
+                html += `
+                    <tr>
+                        <td>${prop.id}</td>
+                        <td>
+                            <a href="/properties/${prop.id}" class="text-decoration-none">
+                                ${address.substring(0, 40)}${address.length > 40 ? '...' : ''}
+                            </a>
+                        </td>
+                        <td>${prop.property_type || '-'}</td>
+                        <td>${rooms}</td>
+                        <td>${area}</td>
+                        <td>${floor}</td>
+                        <td>
+                            <span class="badge bg-primary">${prop.listings_count || prop.listings?.length || 0}</span>
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <a href="/properties/${prop.id}" class="btn btn-outline-primary" title="Просмотр">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                <button class="btn btn-outline-danger" onclick="deleteProperty(${prop.id})" title="Удалить">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
+            
+            html += '</tbody></table></div>';
+            tableContainer.innerHTML = html;
+            
+            renderPagination(data.page, data.pages, data.total);
+            currentPage = page;
+            
+        } catch (error) {
+            loading.classList.remove('show');
+            console.error('Error loading properties:', error);
+            tableContainer.innerHTML = `
+                <div class="alert alert-danger">
+                    Ошибка загрузки данных
+                </div>
+            `;
+        }
+    }
+    
+    function renderPagination(page, pages, total) {
+        if (pages <= 1) {
+            document.getElementById('pagination').innerHTML = '';
+            return;
+        }
+        
+        let html = `
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="text-muted">Всего: ${total}</span>
+                <ul class="pagination mb-0">
+        `;
+        
+        html += `
+            <li class="page-item ${page === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" data-page="${page - 1}">
+                    <i class="bi bi-chevron-left"></i>
+                </a>
+            </li>
+        `;
+        
+        const startPage = Math.max(1, page - 2);
+        const endPage = Math.min(pages, page + 2);
+        
+        for (let i = startPage; i <= endPage; i++) {
+            html += `
+                <li class="page-item ${i === page ? 'active' : ''}">
+                    <a class="page-link" href="#" data-page="${i}">${i}</a>
+                </li>
+            `;
+        }
+        
+        html += `
+            <li class="page-item ${page === pages ? 'disabled' : ''}">
+                <a class="page-link" href="#" data-page="${page + 1}">
+                    <i class="bi bi-chevron-right"></i>
+                </a>
+            </li>
+        `;
+        
+        html += '</ul></div>';
+        document.getElementById('pagination').innerHTML = html;
+        
+        // Добавляем обработчики событий для пагинации
+        document.querySelectorAll('#pagination .page-link[data-page]').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const targetPage = parseInt(link.getAttribute('data-page'));
+                if (targetPage && targetPage >= 1) {
+                    loadProperties(targetPage);
+                }
+            });
+        });
+    }
+    
+    async function deleteProperty(id) {
+        if (!confirm('Удалить объект? Объявления будут отвязаны.')) return;
+        
+        try {
+            const response = await fetch(`/api/properties/${id}`, { method: 'DELETE' });
+            if (response.ok) {
+                loadProperties(currentPage);
+            }
+        } catch (error) {
+            console.error('Error deleting property:', error);
+        }
+    }
+    
+    async function rematchProperties() {
+        if (!confirm('Пересопоставить все объявления с объектами? Это может занять время.')) return;
+        
+        try {
+            const response = await fetch('/api/properties/rematch', { method: 'POST' });
+            const result = await response.json();
+            alert(`Обработано: ${result.processed}, создано: ${result.created}, ошибок: ${result.failed}`);
+            loadProperties(1);
+        } catch (error) {
+            console.error('Error rematching:', error);
+            alert('Ошибка пересопоставления');
+        }
+    }
+    
+    async function loadCities() {
+        try {
+            const response = await fetch('/api/parser/config/cities');
+            const data = await response.json();
+            const citySelect = document.getElementById('city');
+            
+            // Очищаем список (кроме первого пустого option)
+            citySelect.innerHTML = '<option value="">Город</option>';
+            
+            // Добавляем города (используем name для значения, так как в БД хранится полное название)
+            for (const city of data.cities) {
+                const option = document.createElement('option');
+                option.value = city.name;
+                option.textContent = city.name;
+                citySelect.appendChild(option);
+            }
+        } catch (error) {
+            console.error('Error loading cities:', error);
+        }
+    }
+    
+    document.getElementById('filter-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        loadProperties(1);
+    });
+    
+    document.addEventListener('DOMContentLoaded', () => {
+        loadCities();
+        loadProperties();
+    });
+</script>
+{% endblock %}
