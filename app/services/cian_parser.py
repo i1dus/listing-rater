@@ -831,7 +831,7 @@ class CianParser:
                 self.db.refresh(listing)
                 
                 # Пытаемся сопоставить с недвижимостью
-                property_obj = self.property_matcher.find_or_create_property(listing)
+                property_obj = self.property_matcher.find_or_create_property(listing, save_match_score=True)
                 if property_obj:
                     listing.property_id = property_obj.id
                     self.db.commit()

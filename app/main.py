@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import engine, Base, get_db
-from app.routers import listings_router, properties_router, parser_router
+from app.routers import listings_router, properties_router, parser_router, admin_router
 from app.models import Listing, Property
 
 settings = get_settings()
@@ -32,6 +32,7 @@ app = FastAPI(
 app.include_router(listings_router)
 app.include_router(properties_router)
 app.include_router(parser_router)
+app.include_router(admin_router)
 
 templates = Jinja2Templates(directory="app/templates")
 
@@ -84,7 +85,13 @@ async def property_detail_page(request: Request, property_id: int):
 @app.get("/parser", response_class=HTMLResponse)
 async def parser_page(request: Request):
     """Страница управления парсингом"""
-    return templates.TemplateResponse("parser.html", {"request": request    })
+    return templates.TemplateResponse("parser.html", {"request": request})
+
+
+@app.get("/admin/match-config", response_class=HTMLResponse)
+async def match_config_page(request: Request):
+    """Страница настройки метчинга"""
+    return templates.TemplateResponse("match_config.html", {"request": request})
 
 
 @app.get("/health")

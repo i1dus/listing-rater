@@ -7,7 +7,9 @@ from app.database import get_db
 from app.models import Listing
 from app.schemas.listing import ListingResponse, ListingListResponse, ListingUpdate
 from app.services.cian_parser import CianParser
-from app.services.listing_scorer import ListingScorer
+from app.services.listing_scorer import ListingScorer  # Старый сервис (для обратной совместимости)
+from app.services.property_matcher import PropertyMatcher
+from app.services.scoring import SaleProbabilityScorer, RegionalStatistics
 
 DEAL_TYPE_SLUG_TO_NAME = {
     "sale": "Продажа",
@@ -232,7 +234,11 @@ def parse_listing_details(listing_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{listing_id}/sale-probability")
-def get_sale_probability(listing_id: int, db: Session = Depends(get_db)):
+def get_sale_probability(
+    listing_id: int, 
+    db: Session = Depends(get_db),
+    include_details: bool = Query(True, description="Включать детальную информацию")
+):
     """Вычислить вероятность продажи объявления"""
     listing = db.query(Listing).filter(Listing.id == listing_id).first()
     if not listing:
@@ -250,7 +256,89 @@ def get_sale_probability(listing_id: int, db: Session = Depends(get_db)):
             detail="Недостаточно данных для вычисления вероятности. Сначала выполните 'Спарсить полностью'."
         )
     
-    scorer = ListingScorer()
-    result = scorer.calculate_sale_probability(listing)
+    # Используем новый ML-готовый сервис
+    regional_stats = RegionalStatistics(db)
+    scorer = SaleProbabilityScorer(regional_stats=regional_stats)
+    result = scorer.calculate_probability(listing, include_details=include_details)
     
     return result
+
+
+@router.get("/{listing_id}/match-details")
+def get_match_details(listing_id: int, db: Session = Depends(get_db)):
+    """Получить детали метчинга объявления с объектом недвижимости"""
+    listing = db.query(Listing).filter(Listing.id == listing_id).first()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Объявление не найдено")
+    
+    if not listing.property_id:
+        return {
+            "has_match": False,
+            "message": "Объявление не сопоставлено с объектом недвижимости"
+        }
+    
+    property_obj = listing.property
+    if not property_obj:
+        return {
+            "has_match": False,
+            "message": "Объект недвижимости не найден"
+        }
+    
+    # Вычисляем детали метчинга
+    matcher = PropertyMatcher(db)
+    match_result = matcher._calculate_similarity(listing, property_obj)
+    
+    # Форматируем результаты для отображения
+    attribute_labels = {
+        'city': 'Город',
+        'street': 'Улица',
+        'house_number': 'Номер дома',
+        'rooms': 'Комнаты',
+        'area_total': 'Общая площадь',
+        'floor': 'Этаж',
+        'property_type': 'Тип недвижимости',
+        'district': 'Район',
+        'area_living': 'Жилая площадь',
+        'area_kitchen': 'Площадь кухни'
+    }
+    
+    matched_details = []
+    for attr_name, (matches, similarity) in match_result.matched_attributes.items():
+        label = attribute_labels.get(attr_name, attr_name)
+        is_strict = attr_name in match_result.strict_violations
+        
+        # Получаем значения из объявления и объекта
+        listing_val = getattr(listing, attr_name, None)
+        if attr_name in ['city', 'street', 'house_number', 'district']:
+            # Для адресных полей используем специальную логику
+            address_parts = matcher._extract_address_parts(listing)
+            if attr_name == 'city':
+                listing_val = address_parts.get('city') or listing.city
+            elif attr_name == 'street':
+                listing_val = address_parts.get('street')
+            elif attr_name == 'house_number':
+                listing_val = address_parts.get('house_number')
+            elif attr_name == 'district':
+                listing_val = address_parts.get('district') or listing.district
+        
+        property_val = getattr(property_obj, attr_name, None)
+        
+        matched_details.append({
+            'attribute': attr_name,
+            'label': label,
+            'matches': matches,
+            'similarity': similarity,
+            'is_strict': attr_name in matcher.strict_attrs,
+            'listing_value': listing_val,
+            'property_value': property_val,
+            'weight': matcher.weights.get(attr_name, 0.0)
+        })
+    
+    return {
+        "has_match": True,
+        "similarity_score": match_result.similarity_score,
+        "threshold": matcher.threshold,
+        "strict_violations": match_result.strict_violations,
+        "matched_attributes": matched_details,
+        "property_id": property_obj.id
+    }

@@ -72,6 +72,16 @@
                 </div>
             </div>
             
+            <!-- Детали метчинга -->
+            <div class="card mb-4" id="match-details-card" style="display: none;">
+                <div class="card-header">
+                    <i class="bi bi-diagram-3 me-2"></i> Детали метчинга
+                </div>
+                <div class="card-body" id="match-details-content">
+                    <!-- Детали будут загружены динамически -->
+                </div>
+            </div>
+            
             <!-- Парсинг -->
             <div class="card mb-4">
                 <div class="card-header">
@@ -229,11 +239,30 @@
             
             // Объект недвижимости
             if (listingData.property_id) {
+                let matchScoreHtml = '';
+                if (listingData.match_score !== null && listingData.match_score !== undefined) {
+                    const score = Math.round(listingData.match_score);
+                    let badgeClass = 'bg-success';
+                    if (score < 70) badgeClass = 'bg-danger';
+                    else if (score < 85) badgeClass = 'bg-warning';
+                    
+                    matchScoreHtml = `
+                        <div class="mb-2">
+                            <small class="text-muted d-block mb-1">Сходство с объектом:</small>
+                            <span class="badge ${badgeClass}">${score}%</span>
+                        </div>
+                    `;
+                }
+                
                 document.getElementById('property-info').innerHTML = `
+                    ${matchScoreHtml}
                     <a href="/properties/${listingData.property_id}" class="btn btn-outline-primary w-100">
                         <i class="bi bi-building me-2"></i> Объект #${listingData.property_id}
                     </a>
                 `;
+                
+                // Загружаем детали метчинга
+                loadMatchDetails();
             }
             
             // Показываем кнопку вычисления вероятности если есть достаточно данных
@@ -373,6 +402,101 @@
             alert('Ошибка сохранения');
         }
     });
+    
+    async function loadMatchDetails() {
+        try {
+            const response = await fetch(`/api/listings/${listingId}/match-details`);
+            if (!response.ok) {
+                return;
+            }
+            
+            const matchData = await response.json();
+            
+            if (!matchData.has_match) {
+                return;
+            }
+            
+            const detailsCard = document.getElementById('match-details-card');
+            const detailsContent = document.getElementById('match-details-content');
+            
+            let html = '';
+            
+            // Общий процент сходства
+            const score = Math.round(matchData.similarity_score);
+            let badgeClass = 'bg-success';
+            if (score < matchData.threshold) badgeClass = 'bg-danger';
+            else if (score < 85) badgeClass = 'bg-warning';
+            
+            html += `
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <strong>Процент сходства:</strong>
+                        <span class="badge ${badgeClass}">${score}%</span>
+                    </div>
+                    <small class="text-muted">Порог: ${matchData.threshold}%</small>
+                </div>
+            `;
+            
+            // Нарушения строгих атрибутов
+            if (matchData.strict_violations && matchData.strict_violations.length > 0) {
+                html += `
+                    <div class="alert alert-danger mb-3">
+                        <strong>Нарушены строгие атрибуты:</strong>
+                        <ul class="mb-0 mt-2">
+                            ${matchData.strict_violations.map(attr => `<li><code>${attr}</code></li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            // Детали по атрибутам
+            html += '<h6 class="mb-3">Детали совпадения:</h6>';
+            html += '<div class="table-responsive"><table class="table table-sm">';
+            html += '<thead><tr><th>Атрибут</th><th>Объявление</th><th>Объект</th><th>Совпадение</th><th>Вес</th></tr></thead>';
+            html += '<tbody>';
+            
+            for (const attr of matchData.matched_attributes) {
+                const matchIcon = attr.matches 
+                    ? '<i class="bi bi-check-circle-fill text-success"></i>' 
+                    : '<i class="bi bi-x-circle-fill text-danger"></i>';
+                const similarityPercent = Math.round(attr.similarity * 100);
+                const strictBadge = attr.is_strict ? ' <span class="badge bg-warning">строгий</span>' : '';
+                
+                html += `
+                    <tr class="${attr.matches ? '' : 'table-danger'}">
+                        <td>
+                            <strong>${attr.label}</strong>${strictBadge}
+                            <br><small class="text-muted"><code>${attr.attribute}</code></small>
+                        </td>
+                        <td>${formatValue(attr.listing_value)}</td>
+                        <td>${formatValue(attr.property_value)}</td>
+                        <td>
+                            ${matchIcon} ${similarityPercent}%
+                        </td>
+                        <td>${attr.weight.toFixed(1)}%</td>
+                    </tr>
+                `;
+            }
+            
+            html += '</tbody></table></div>';
+            
+            detailsContent.innerHTML = html;
+            detailsCard.style.display = 'block';
+            
+        } catch (error) {
+            console.error('Error loading match details:', error);
+        }
+    }
+    
+    function formatValue(value) {
+        if (value === null || value === undefined || value === '') {
+            return '<span class="text-muted">-</span>';
+        }
+        if (typeof value === 'number') {
+            return value;
+        }
+        return value;
+    }
     
     document.addEventListener('DOMContentLoaded', loadListing);
 </script>

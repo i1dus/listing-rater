@@ -1,0 +1,310 @@
+{% extends "base.html" %}
+
+{% block title %}Настройки метчинга - Listing Rater{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-gear me-2"></i>Настройки метчинга</h2>
+    <button type="button" class="btn btn-outline-secondary" id="reset-btn">
+        <i class="bi bi-arrow-counterclockwise me-2"></i>Сбросить к дефолту
+    </button>
+</div>
+
+<div id="loading" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status"></div>
+    <p class="mt-2">Загрузка...</p>
+</div>
+
+<div id="content" style="display: none;">
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-sliders me-2"></i>Веса атрибутов
+                    <small class="text-muted ms-2">(сумма должна быть ~100)</small>
+                </div>
+                <div class="card-body">
+                    <div id="weights-container">
+                        <!-- Веса будут загружены динамически -->
+                    </div>
+                    <div class="mt-3">
+                        <strong>Итого: <span id="total-weight">0</span></strong>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-shield-check me-2"></i>Строгие атрибуты
+                    <small class="text-muted ms-2">(должны строго совпадать, иначе сходство = 0)</small>
+                </div>
+                <div class="card-body">
+                    <div id="strict-attributes-container">
+                        <!-- Строгие атрибуты будут загружены динамически -->
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="bi bi-percent me-2"></i>Порог сходства
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Минимальный процент сходства для сопоставления (0-100)</label>
+                        <input type="number" class="form-control" id="threshold-input" min="0" max="100" step="0.1">
+                        <small class="text-muted">Если процент сходства ниже этого значения, объявление не будет сопоставлено с объектом</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-info-circle me-2"></i>Информация
+                </div>
+                <div class="card-body">
+                    <h6>Как работает метчинг:</h6>
+                    <ul class="small">
+                        <li>Каждый атрибут имеет свой вес в вычислении сходства</li>
+                        <li>Строгие атрибуты должны совпадать точно, иначе сходство = 0%</li>
+                        <li>Для площади допускается погрешность ±2 м²</li>
+                        <li>Для этажа допускается погрешность ±1 этаж</li>
+                        <li>Процент сходства вычисляется как сумма (вес × процент совпадения)</li>
+                    </ul>
+                    
+                    <hr>
+                    
+                    <h6>Доступные атрибуты:</h6>
+                    <ul class="small">
+                        <li><code>city</code> - Город</li>
+                        <li><code>street</code> - Улица</li>
+                        <li><code>house_number</code> - Номер дома</li>
+                        <li><code>rooms</code> - Количество комнат</li>
+                        <li><code>area_total</code> - Общая площадь</li>
+                        <li><code>floor</code> - Этаж</li>
+                        <li><code>property_type</code> - Тип недвижимости</li>
+                        <li><code>district</code> - Район</li>
+                        <li><code>area_living</code> - Жилая площадь</li>
+                        <li><code>area_kitchen</code> - Площадь кухни</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="mt-4">
+        <button type="button" class="btn btn-primary btn-lg" id="save-btn">
+            <i class="bi bi-check-lg me-2"></i>Сохранить настройки
+        </button>
+        <div id="save-status" class="mt-3"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let configData = null;
+    const attributeLabels = {
+        'city': 'Город',
+        'street': 'Улица',
+        'house_number': 'Номер дома',
+        'rooms': 'Комнаты',
+        'area_total': 'Общая площадь',
+        'floor': 'Этаж',
+        'property_type': 'Тип недвижимости',
+        'district': 'Район',
+        'area_living': 'Жилая площадь',
+        'area_kitchen': 'Площадь кухни'
+    };
+    
+    async function loadConfig() {
+        try {
+            const response = await fetch('/api/admin/match-config');
+            if (!response.ok) {
+                throw new Error('Failed to load config');
+            }
+            
+            configData = await response.json();
+            
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+            
+            renderWeights();
+            renderStrictAttributes();
+            document.getElementById('threshold-input').value = parseFloat(configData.threshold);
+            
+        } catch (error) {
+            console.error('Error loading config:', error);
+            document.getElementById('loading').innerHTML = `
+                <div class="alert alert-danger">
+                    Ошибка загрузки настроек
+                </div>
+            `;
+        }
+    }
+    
+    function renderWeights() {
+        const container = document.getElementById('weights-container');
+        let html = '';
+        
+        for (const [attr, weight] of Object.entries(configData.weights)) {
+            const label = attributeLabels[attr] || attr;
+            html += `
+                <div class="mb-3">
+                    <label class="form-label">
+                        ${label} (<code>${attr}</code>)
+                    </label>
+                    <div class="input-group">
+                        <input type="number" 
+                               class="form-control weight-input" 
+                               data-attr="${attr}"
+                               value="${weight}" 
+                               min="0" 
+                               step="0.1">
+                        <span class="input-group-text">%</span>
+                    </div>
+                </div>
+            `;
+        }
+        
+        container.innerHTML = html;
+        
+        // Добавляем обработчики для пересчета суммы
+        document.querySelectorAll('.weight-input').forEach(input => {
+            input.addEventListener('input', updateTotalWeight);
+        });
+        
+        updateTotalWeight();
+    }
+    
+    function renderStrictAttributes() {
+        const container = document.getElementById('strict-attributes-container');
+        const allAttributes = Object.keys(configData.weights);
+        
+        let html = '';
+        for (const attr of allAttributes) {
+            const label = attributeLabels[attr] || attr;
+            const isStrict = configData.strict_attributes.includes(attr);
+            
+            html += `
+                <div class="form-check mb-2">
+                    <input class="form-check-input strict-checkbox" 
+                           type="checkbox" 
+                           data-attr="${attr}"
+                           id="strict-${attr}"
+                           ${isStrict ? 'checked' : ''}>
+                    <label class="form-check-label" for="strict-${attr}">
+                        ${label} (<code>${attr}</code>)
+                    </label>
+                </div>
+            `;
+        }
+        
+        container.innerHTML = html;
+    }
+    
+    function updateTotalWeight() {
+        let total = 0;
+        document.querySelectorAll('.weight-input').forEach(input => {
+            total += parseFloat(input.value) || 0;
+        });
+        
+        const totalEl = document.getElementById('total-weight');
+        totalEl.textContent = total.toFixed(1);
+        
+        if (Math.abs(total - 100) > 5) {
+            totalEl.className = 'text-warning';
+        } else {
+            totalEl.className = 'text-success';
+        }
+    }
+    
+    document.getElementById('save-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('save-btn');
+        const statusDiv = document.getElementById('save-status');
+        
+        // Собираем веса
+        const weights = {};
+        document.querySelectorAll('.weight-input').forEach(input => {
+            const attr = input.dataset.attr;
+            weights[attr] = parseFloat(input.value) || 0;
+        });
+        
+        // Собираем строгие атрибуты
+        const strictAttributes = [];
+        document.querySelectorAll('.strict-checkbox:checked').forEach(checkbox => {
+            strictAttributes.push(checkbox.dataset.attr);
+        });
+        
+        const threshold = parseFloat(document.getElementById('threshold-input').value);
+        
+        const data = {
+            weights: weights,
+            strict_attributes: strictAttributes,
+            threshold: threshold
+        };
+        
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Сохранение...';
+        statusDiv.innerHTML = '';
+        
+        try {
+            const response = await fetch(`/api/admin/match-config/${configData.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            if (response.ok) {
+                statusDiv.innerHTML = '<div class="alert alert-success">Настройки успешно сохранены!</div>';
+                await loadConfig();
+                setTimeout(() => {
+                    statusDiv.innerHTML = '';
+                }, 3000);
+            } else {
+                const error = await response.json();
+                statusDiv.innerHTML = `<div class="alert alert-danger">Ошибка: ${error.detail || 'Не удалось сохранить настройки'}</div>`;
+            }
+        } catch (error) {
+            console.error('Error saving config:', error);
+            statusDiv.innerHTML = '<div class="alert alert-danger">Ошибка при сохранении</div>';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check-lg me-2"></i>Сохранить настройки';
+        }
+    });
+    
+    document.getElementById('reset-btn').addEventListener('click', async () => {
+        if (!confirm('Сбросить настройки к значениям по умолчанию?')) {
+            return;
+        }
+        
+        const defaultWeights = {
+            "city": 15.0,
+            "street": 20.0,
+            "house_number": 15.0,
+            "rooms": 10.0,
+            "area_total": 15.0,
+            "floor": 5.0,
+            "property_type": 10.0,
+            "district": 5.0,
+            "area_living": 3.0,
+            "area_kitchen": 2.0
+        };
+        const defaultStrict = ["city", "street", "house_number"];
+        const defaultThreshold = 70.0;
+        
+        configData.weights = defaultWeights;
+        configData.strict_attributes = defaultStrict;
+        configData.threshold = defaultThreshold.toString();
+        
+        renderWeights();
+        renderStrictAttributes();
+        document.getElementById('threshold-input').value = defaultThreshold;
+    });
+    
+    document.addEventListener('DOMContentLoaded', loadConfig);
+</script>
+{% endblock %}

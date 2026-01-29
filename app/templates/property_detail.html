@@ -123,7 +123,7 @@
             // Объявления
             if (data.listings && data.listings.length > 0) {
                 let html = '<div class="table-responsive"><table class="table table-hover"><thead><tr>';
-                html += '<th>ID</th><th>Заголовок</th><th>Цена</th><th>Тип</th><th>Статус</th></tr></thead><tbody>';
+                html += '<th>ID</th><th>Заголовок</th><th>Цена</th><th>Тип</th><th>Сходство</th><th>Статус</th></tr></thead><tbody>';
                 
                 for (const listing of data.listings) {
                     const price = listing.price ? new Intl.NumberFormat('ru-RU').format(listing.price) + ' ₽' : '-';
@@ -137,12 +137,23 @@
                         return dealType || '-';
                     };
                     
+                    // Процент сходства
+                    let matchScoreHtml = '-';
+                    if (listing.match_score !== null && listing.match_score !== undefined) {
+                        const score = Math.round(listing.match_score);
+                        let badgeClass = 'bg-success';
+                        if (score < 70) badgeClass = 'bg-danger';
+                        else if (score < 85) badgeClass = 'bg-warning';
+                        matchScoreHtml = `<span class="badge ${badgeClass}">${score}%</span>`;
+                    }
+                    
                     html += `
                         <tr onclick="window.location='/listings/${listing.id}'" style="cursor:pointer">
                             <td>${listing.avito_id}</td>
                             <td>${listing.title ? listing.title.substring(0, 30) + '...' : '-'}</td>
                             <td>${price}</td>
                             <td>${getDealTypeDisplay(listing.deal_type)}</td>
+                            <td>${matchScoreHtml}</td>
                             <td>${status}</td>
                         </tr>
                     `;

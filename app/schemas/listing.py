@@ -77,6 +77,7 @@ class ListingResponse(ListingBase):
     id: int
     avito_id: int
     property_id: Optional[int] = None
+    match_score: Optional[float] = None  # Процент сходства с объектом недвижимости (0-100)
     is_active: bool
     images: Optional[str] = None
     parsed_at: datetime

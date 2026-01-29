@@ -13,6 +13,7 @@ class Listing(Base):
     id = Column(Integer, primary_key=True, index=True)
     avito_id = Column(BigInteger, unique=True, index=True, nullable=False)
     property_id = Column(Integer, ForeignKey("properties.id"), nullable=True, index=True)
+    match_score = Column(Float, nullable=True, comment="Процент сходства с объектом недвижимости (0-100)")
     
     title = Column(String(500), nullable=True)
     description = Column(Text, nullable=True)
